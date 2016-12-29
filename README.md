@@ -189,6 +189,13 @@ cat /usr/share/dict/words | fzf-tmux -l 20% --multi --reverse
 It will still work even when you're not on tmux, silently ignoring `-[udlr]`
 options, so you can invariably use `fzf-tmux` in your scripts.
 
+Alternatively, you can use `--height HEIGHT[%]` option not to start fzf in
+fullscreen mode.
+
+```sh
+fzf --height 40%
+```
+
 Key bindings for command line
 -----------------------------
 

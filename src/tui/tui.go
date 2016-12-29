@@ -115,6 +115,57 @@ const (
 	colWhite
 )
 
+type ColorIndex int16
+
+const (
+	ColDefault ColorIndex = iota
+	ColNormal
+	ColPrompt
+	ColMatch
+	ColCurrent
+	ColCurrentMatch
+	ColSpinner
+	ColInfo
+	ColCursor
+	ColSelected
+	ColHeader
+	ColBorder
+	ColUser // Should be the last entry
+)
+
+func (i ColorIndex) Pair() ColorPair {
+	if i >= ColDefault && i < ColUser {
+		return Pallete[i]
+	}
+	return Pallete[ColDefault]
+}
+
+type ColorPair struct {
+	fg    Color
+	bg    Color
+	index ColorIndex
+}
+
+func NewColorPair(fg Color, bg Color) ColorPair {
+	return ColorPair{fg, bg, ColUser}
+}
+
+func (p ColorPair) Fg() Color {
+	return p.fg
+}
+
+func (p ColorPair) Bg() Color {
+	return p.bg
+}
+
+func (p ColorPair) key() int {
+	return (int(p.Fg()) << 8) + int(p.Bg())
+}
+
+func (p ColorPair) is24() bool {
+	return p.Fg().is24() || p.Bg().is24()
+}
+
 type ColorTheme struct {
 	Fg           Color
 	Bg           Color
@@ -146,22 +197,71 @@ type MouseEvent struct {
 	Mod    bool
 }
 
-var (
-	_color        bool
-	_prevDownTime time.Time
-	_clickY       []int
-	Default16     *ColorTheme
-	Dark256       *ColorTheme
-	Light256      *ColorTheme
-)
+type Renderer interface {
+	Init()
+	Pause()
+	Resume() bool
+	Clear()
+	RefreshWindows(windows []Window)
+	Refresh()
+	Close()
 
-type Window struct {
-	impl   *WindowImpl
-	Top    int
-	Left   int
-	Width  int
-	Height int
+	GetChar() Event
+
+	MaxX() int
+	MaxY() int
+	DoesAutoWrap() bool
+
+	NewWindow(top int, left int, width int, height int, border bool) Window
 }
+
+type Window interface {
+	Top() int
+	Left() int
+	Width() int
+	Height() int
+
+	Refresh()
+	FinishFill()
+	Close()
+
+	X() int
+	Enclose(y int, x int) bool
+
+	Move(y int, x int)
+	MoveAndClear(y int, x int)
+	Print(text string)
+	CPrint(color ColorIndex, attr Attr, text string)
+	CPrintPair(pair ColorPair, attr Attr, text string)
+	Fill(text string) bool
+	CFill(fg Color, bg Color, attr Attr, text string) bool
+	Erase()
+}
+
+type FullscreenRenderer struct {
+	theme        *ColorTheme
+	mouse        bool
+	forceBlack   bool
+	prevDownTime time.Time
+	clickY       []int
+}
+
+func NewFullscreenRenderer(theme *ColorTheme, forceBlack bool, mouse bool) Renderer {
+	r := &FullscreenRenderer{
+		theme:        theme,
+		mouse:        mouse,
+		forceBlack:   forceBlack,
+		prevDownTime: time.Unix(0, 0),
+		clickY:       []int{}}
+	return r
+}
+
+var (
+	Pallete   [ColUser]ColorPair
+	Default16 *ColorTheme
+	Dark256   *ColorTheme
+	Light256  *ColorTheme
+)
 
 func EmptyTheme() *ColorTheme {
 	return &ColorTheme{
@@ -181,8 +281,6 @@ func EmptyTheme() *ColorTheme {
 }
 
 func init() {
-	_prevDownTime = time.Unix(0, 0)
-	_clickY = []int{}
 	Default16 = &ColorTheme{
 		Fg:           colDefault,
 		Bg:           colDefault,
@@ -227,14 +325,15 @@ func init() {
 		Border:       145}
 }
 
-func InitTheme(theme *ColorTheme, black bool) {
-	_color = theme != nil
-	if !_color {
+func initTheme(theme *ColorTheme, baseTheme *ColorTheme, forceBlack bool) {
+	if theme == nil {
+		for idx := ColDefault; idx < ColUser; idx++ {
+			Pallete[idx] = ColorPair{colDefault, colDefault, idx}
+		}
 		return
 	}
 
-	baseTheme := DefaultTheme()
-	if black {
+	if forceBlack {
 		theme.Bg = colBlack
 	}
 
@@ -257,4 +356,29 @@ func InitTheme(theme *ColorTheme, black bool) {
 	theme.Selected = o(baseTheme.Selected, theme.Selected)
 	theme.Header = o(baseTheme.Header, theme.Header)
 	theme.Border = o(baseTheme.Border, theme.Border)
+
+	Pallete[ColDefault] = ColorPair{colDefault, colDefault, ColDefault}
+	Pallete[ColNormal] = ColorPair{theme.Fg, theme.Bg, ColNormal}
+	Pallete[ColPrompt] = ColorPair{theme.Prompt, theme.Bg, ColPrompt}
+	Pallete[ColMatch] = ColorPair{theme.Match, theme.Bg, ColMatch}
+	Pallete[ColCurrent] = ColorPair{theme.Current, theme.DarkBg, ColCurrent}
+	Pallete[ColCurrentMatch] = ColorPair{theme.CurrentMatch, theme.DarkBg, ColCurrentMatch}
+	Pallete[ColSpinner] = ColorPair{theme.Spinner, theme.Bg, ColSpinner}
+	Pallete[ColInfo] = ColorPair{theme.Info, theme.Bg, ColInfo}
+	Pallete[ColCursor] = ColorPair{theme.Cursor, theme.DarkBg, ColCursor}
+	Pallete[ColSelected] = ColorPair{theme.Selected, theme.DarkBg, ColSelected}
+	Pallete[ColHeader] = ColorPair{theme.Header, theme.Bg, ColHeader}
+	Pallete[ColBorder] = ColorPair{theme.Border, theme.Bg, ColBorder}
+}
+
+func attrFor(color ColorIndex, attr Attr) Attr {
+	switch color {
+	case ColCurrent:
+		return attr | Reverse
+	case ColMatch:
+		return attr | Underline
+	case ColCurrentMatch:
+		return attr | Underline | Reverse
+	}
+	return attr
 }

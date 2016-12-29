@@ -270,9 +270,14 @@ try
     let prefix = ''
   endif
   let tmux = (!has('nvim') || get(g:, 'fzf_prefer_tmux', 0)) && s:tmux_enabled() && s:splittable(dict)
+  let term = has('nvim') && !tmux
+  if term
+    " --height option is not allowed
+    let optstr .= ' --no-height'
+  endif
   let command = prefix.(tmux ? s:fzf_tmux(dict) : fzf_exec).' '.optstr.' > '.temps.result
 
-  if has('nvim') && !tmux
+  if term
     return s:execute_term(dict, command, temps)
   endif
 
